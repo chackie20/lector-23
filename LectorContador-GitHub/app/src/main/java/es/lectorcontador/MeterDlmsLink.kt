@@ -12,7 +12,7 @@ import kotlin.coroutines.coroutineContext
 
 /** Resultado de la negociación inicial hacia el modo E: identificación del contador y velocidad acordada. */
 class ModeEResult(val ident: Identification, val baud: Int, val identBytes: ByteArray) {
-    val text: String get() = "${ident.manufacturer} ${ident.text}".trim()
+    val text: String get() = "${ident.manufacturer}${ident.text}".trim()
 }
 
 /**
@@ -49,14 +49,27 @@ object IecModeE {
         val baud = Iec62056.baudFor(ident.baudChar) ?: 9600
         log?.invoke("Identificación: ${ByteFormat.ascii(identBytes)}")
         log?.invoke("   HEX: ${ByteFormat.hex(identBytes)}")
-        log?.invoke("   Fabricante ${ident.manufacturer}, velocidad propuesta $baud baudios.")
+        log?.invoke("   Fabricante ${ident.manufacturer}, velocidad propuesta$baud baudios.")
 
-        // El estándar pide esperar un poco antes del ACK; el ACK a 300 baudios tarda ~220 ms en salir.
-        delay(300)
-        port.write(DlmsSetup.modeEAck(ident.baudChar), 1000)
-        delay(350)
+        // 1. Pausa recomendada por IEC 62056-21 antes de responder ACK
+        delay(250)
+        
+        // 2. Enviar el ACK de modo E a 300 baudios (7E1)
+        val ack = DlmsSetup.modeEAck(ident.baudChar)
+        port.write(ack, 1000)
+        
+        // CORRECCIÓN CRÍTICA: Asegurar el drenaje total del búfer del chip USB.
+        // A 300 baudios (10 bits/char), 6 bytes tardan ~200 ms en emitirse físicamente.
+        // Si se cambia la velocidad mientras la UART envía, los bytes se corrompen.
+        delay(400)
+
+        // 3. Cambiar parámetros del puerto a la nueva velocidad a 8N1 (modo HDLC)
         port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-        runCatching { port.purgeHwBuffers(true, true) }
+        
+        // 4. Estabilización de línea y purga solo de la recepción residual
+        delay(300)
+        runCatching { port.purgeHwBuffers(false, true) } // Solo purgar RX (no TX)
+
         return ModeEResult(ident, baud, identBytes)
     }
 }
@@ -134,7 +147,7 @@ class DlmsSession(
             status("Abriendo el enlace HDLC con el servidor $candidate…")
             if (!dlms.connect()) continue
 
-            status("Asociando (cliente ${cfg.dlmsClient}, ${if (password != null) "con contraseña" else "sin contraseña"})…")
+            status("Asociando (cliente ${cfg.dlmsClient},${if (password != null) "con contraseña" else "sin contraseña"})…")
             val aare = try {
                 dlms.associate(password)
             } catch (e: IOException) {
@@ -144,7 +157,7 @@ class DlmsSession(
             if (aare.result != 0) {
                 dlms.disconnect()
                 throw IOException(
-                    "El contador rechazó la asociación con el cliente ${cfg.dlmsClient}: ${Dlms.aareFailureText(aare)}. " +
+                    "El contador rechazó la asociación con el cliente ${cfg.dlmsClient}:${Dlms.aareFailureText(aare)}. " +
                         "Revisa el cliente y la contraseña en Ajustes; el Diagnóstico DLMS prueba los clientes habituales."
                 )
             }
@@ -231,31 +244,4 @@ class MeterDlmsLink(
     }
 
     private fun who(session: DlmsSession) =
-        "cliente ${cfg.dlmsClient}${if (session.password == null) ", sin contraseña" else ""}"
-
-    /** Aviso de lectura parcial: hay identificación pero ninguna energía. */
-    private fun partialWarning(session: DlmsSession, res: DlmsReadResult): String = when {
-        res.denied > 0 ->
-            "Lectura parcial: el contador solo entrega la identificación al ${who(session)} y deniega la energía. " +
-                "Hace falta el cliente y la contraseña de lectura que fija la distribuidora (Ajustes)."
-        res.missing > 0 ->
-            "Lectura parcial: el contador no tiene los registros OBIS estándar de energía. " +
-                "«Listar objetos» en Diagnóstico muestra cuáles expone."
-        else -> "Lectura parcial: no se pudo leer ninguna energía" + (res.failed.firstOrNull()?.let { " ($it)" } ?: ".")
-    }
-
-    private fun noEnergyError(session: DlmsSession, res: DlmsReadResult): IOException = when {
-        res.denied > 0 -> DlmsAccessException(
-            "Enlace y asociación correctos, pero el contador deniega todo al ${who(session)}. " +
-                "Hace falta el cliente y la contraseña de lectura, que facilita la distribuidora (Ajustes)."
-        )
-        res.missing > 0 -> DlmsAccessException(
-            "Enlace y asociación correctos, pero el contador no tiene los registros OBIS estándar. " +
-                "Usa «Listar objetos» en Diagnóstico para ver cuáles expone y compártelo."
-        )
-        else -> IOException(
-            "Enlace correcto, pero no se pudo leer ningún valor" +
-                (res.failed.firstOrNull()?.let { ": $it" } ?: ".")
-        )
-    }
-}
+        "cliente ${cfg.dlmsClient}${if (
