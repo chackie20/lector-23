@@ -9,6 +9,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: ./LectorContador-GitHub
+
     steps:
     - name: Checkout del código
       uses: actions/checkout@v4
@@ -19,14 +23,14 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Configurar Gradle
-      uses: gradle/actions/setup-gradle@v3
+    - name: Dar permisos de ejecución a Gradle Wrapper
+      run: chmod +x gradlew
 
-    - name: Compilar APK
-      run: gradle assembleRelease
+    - name: Compilar APK (Release)
+      run: ./gradlew assembleRelease
 
-    - name: Subir el APK generado
+    - name: Subir el APK generado como artefacto
       uses: actions/upload-artifact@v4
       with:
-        name: app-release-apk
-        path: app/build/outputs/apk/release/*.apk
+        name: LectorContador-APK
+        path: LectorContador-GitHub/app/build/outputs/apk/release/*.apk
