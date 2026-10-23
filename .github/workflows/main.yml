@@ -3,8 +3,6 @@ name: Build Android APK
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
@@ -21,13 +19,13 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Dar permisos de ejecución a Gradle Wrapper
-      run: chmod +x gradlew
+    - name: Configurar Gradle
+      uses: gradle/actions/setup-gradle@v3
 
-    - name: Compilar APK (Release / Unsigned)
-      run: ./gradlew assembleRelease
+    - name: Compilar APK
+      run: gradle assembleRelease
 
-    - name: Subir el APK generado como artefacto
+    - name: Subir el APK generado
       uses: actions/upload-artifact@v4
       with:
         name: app-release-apk
